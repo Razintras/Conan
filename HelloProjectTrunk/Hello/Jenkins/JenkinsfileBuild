@@ -1,0 +1,62 @@
+pipeline {
+    agent any
+
+    environment {
+        SVN_URL = 'svn+ssh://build-com-lin-01/svn/JenkinsTestClaude/trunk/Hello'
+        SVN_CREDENTIALS_ID = 'BUILD-COM-LIN-01'
+    }
+
+    stages {
+        stage('Initialisation') {
+            steps {
+                script {
+                    echo 'Initialisation du pipeline...'
+                    cleanWs() // Nettoie l'espace de travail
+                    checkout([$class: 'SubversionSCM',
+                        locations: [[credentialsId: SVN_CREDENTIALS_ID, depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: SVN_URL]],
+                        workspaceUpdater: [$class: 'UpdateUpdater']])
+                }
+            }
+        }
+
+        stage('Installation de Conan') {
+            steps {
+                script {
+                    def conanInstalled = bat returnStatus: true, script: 'conan --version'
+                    if (conanInstalled != 0) {
+                        echo 'Conan n\'est pas installé. Installation de Conan...'
+                        bat 'pip install conan'
+                    }
+                }
+            }
+        }
+
+        stage('Récupération des Dépendances avec Conan') {
+            steps {
+                script {
+                    // Vérifier si le remote MonSVN existe déjà
+                    def remoteExists = bat returnStatus: true, script: 'conan remote list | findstr MonGit'
+                    
+                    // Si le remote n'existe pas, le créer
+                    if (remoteExists != 0) {
+                        bat 'conan remote add MonGit https://github.com/Razintras/HelloDll.git'
+                    }
+                    
+                    // Changer le répertoire vers src/hello pour installer les dépendances de hello
+                    dir('src/hello') {
+                        bat 'conan install . --build missing --remote=MonGit'
+                    }
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir('Hello') {
+                    bat 'Build.bat'
+                }
+                archiveArtifacts artifacts: 'Hello/bin/*', allowEmptyArchive: true
+            }
+        }
+    }
+}
